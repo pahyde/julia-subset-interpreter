@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Scanner;
 
+import lexer.TokenType;
+
 public class Tokenizer {
 
     private HashMap<String, TokenType> keywordTokenMap = new HashMap<>();

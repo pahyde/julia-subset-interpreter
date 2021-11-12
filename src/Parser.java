@@ -1,378 +1,273 @@
 import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.Queue;
+// import java.util.LinkedList;
+// import java.util.Queue;
+
+import ast.ArithmeticExpression;
+import ast.ArithmeticOp;
+import ast.AssignmentStatement;
+import ast.Block;
+import ast.BooleanExpression;
+import ast.Identifier;
+import ast.IfStatement;
+import ast.LiteralInteger;
+import ast.PrintStatement;
+import ast.RelativeOp;
+import ast.RepeatStatement;
+import ast.Statement;
+import ast.WhileStatement;
+import lexer.TokenType;
 
 public class Parser {
     
     public static ArrayList<Token> tokens;
     public static int i = 0;
 
-    public static ParseTreeNode root;
-
     public static void main(String[] args) {
 
         Tokenizer tokenizer = new Tokenizer();
         tokens = tokenizer.getTokens();        
         
-        program();
-
-        bfs(root);
+        Block AbstractSyntaxTree = parse();
+        AbstractSyntaxTree.execute();
     }
 
-    private static void bfs(ParseTreeNode root) {
-
-        Queue<ParseTreeNode> q = new LinkedList<ParseTreeNode>();
-        q.add(root);
-
-        System.out.println();
-
-        while (!q.isEmpty()) {
-            ParseTreeNode curr = q.remove();
-            System.out.printf("<%s> -> ", curr.symbol);
-
-            for (ParseTreeNode child : curr.children) {
-                if (child.isTerminal) {
-                    System.out.printf("%s ", child.value);
-                } else {
-                    System.out.printf("<%s> ", child.symbol);
-                    q.add(child);
-                }
-            }
-            System.out.println();
-        }
-
-    }
-
-    public static void program() {
-
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-
+    
+    public static Block parse() {
+        
+        // System.out.println("parse");
+        
         TokenType expectedTokens[] = {
             TokenType.FUNCTION,
             TokenType.identifier,
             TokenType.open_parenthesis,
             TokenType.close_parenthesis
         };
-
+        
         for (TokenType expectedTokenType : expectedTokens) {
-            if (currTokenType(expectedTokenType)) {
-                children.add(tokenToParseTreeNode(tokens.get(i++)));
-            } else {
+            consumeToken(expectedTokenType);
+        }
+        
+        Block ast = block();
+        
+        if (!currTokenType(TokenType.END)) {
+            terminateWithError();
+        }
+        
+        return ast;
+    }
+    
+    private static Block block() {
+        
+        // System.out.println("block");
+        ArrayList<Statement> statements = new ArrayList<>();
+        
+        while (true) {
+            if (currTokenType(TokenType.IF_keyword)) {
+                statements.add(ifStatement());
+            } else if (currTokenType(TokenType.identifier)) {
+                statements.add(assignmentStatement());
+            } else if (currTokenType(TokenType.WHILE_keyword)) {
+                statements.add(whileStatement());
+            } else if (currTokenType(TokenType.PRINT_keyword)) {
+                statements.add(printStatement());
+            } else if (currTokenType(TokenType.REPEAT_keyword)) {
+                statements.add(repeatStatement());
+            } else if (statements.size() == 0) {
                 terminateWithError();
+            } else {
+                break;
             }
         }
-
-        block();
-        children.add(root);
-
-        if (currTokenType(TokenType.END)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        root = new ParseTreeNode(SymbolType.program);
-        root.setChildren(children);
-    }
-
-    private static void block() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
         
-        statement();
-        children.add(root);
-
-        if (!currTokenType(TokenType.END) && !currTokenType(TokenType.ELSE_keyword)) {
-            block();
-            children.add(root);
-        }
-
-        root = new ParseTreeNode(SymbolType.block);
-        root.setChildren(children);
+        return new Block(statements);
     }
-
-    private static void statement() {
-        if (currTokenType(TokenType.IF_keyword)) {
-            ifStatement();
-        } else if (currTokenType(TokenType.identifier)) {
-            assignmentStatement();
-        } else if (currTokenType(TokenType.WHILE_keyword)) {
-            whileStatement();
-        } else if (currTokenType(TokenType.PRINT_keyword)) {
-            printStatement();
-        } else if (currTokenType(TokenType.REPEAT_keyword)) {
-            repeatStatement();
-        } else {
-            terminateWithError();
-        }
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        children.add(root);
-        root = new ParseTreeNode(SymbolType.statement, children);
-    }
-
-    private static void repeatStatement() {
-
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        children.add(tokenToParseTreeNode(tokens.get(i++)));
-
-        block();
-        children.add(root);
+    
+    private static RepeatStatement repeatStatement() {
+        consumeToken(TokenType.REPEAT_keyword);
+        Block repeatBlock = block();
+        consumeToken(TokenType.UNTIL_keyword);
+        BooleanExpression condition = booleanExpression();
         
-        if (currTokenType(TokenType.UNTIL_keyword)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        booleanExpression();
-        children.add(root);
-
-        root = new ParseTreeNode(SymbolType.repeat_statement);
-        root.setChildren(children);
+        return new RepeatStatement(repeatBlock, condition);
     }
-
-    private static void booleanExpression() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        relativeOp();
-        children.add(root);
-        arithmeticExpression();
-        children.add(root);
-        arithmeticExpression();
-        children.add(root);
-        root = new ParseTreeNode(SymbolType.boolean_expression, children);
+    
+    private static BooleanExpression booleanExpression() {
+        // System.out.println("bool");
+        return new RelativeOp(relativeOp(), arithmeticExpression(), arithmeticExpression());
     }
-
-    private static void relativeOp() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-
+    
+    private static TokenType relativeOp() {
+        
+        // System.out.println("rel op token");
+        
         TokenType expectedTokens[] = {
             TokenType.le_operator,
             TokenType.lt_operator,
             TokenType.ge_operator,
-            TokenType.gt_operator
+            TokenType.gt_operator,
+            TokenType.eq_operator,
+            TokenType.ne_operator
         };
-
-        boolean found = false;
+        
         for (TokenType expectedTokenType : expectedTokens) {
             if (currTokenType(expectedTokenType)) {
-                children.add(tokenToParseTreeNode(tokens.get(i++)));
-                found = true;
-                break;
+                nextToken();
+                return expectedTokenType;
             }
         }
-
-        if (!found) {
-            terminateWithError();
-        }
-
-        root = new ParseTreeNode(SymbolType.relative_op, children);
-    }
-
-    private static void printStatement() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        children.add(tokenToParseTreeNode(tokens.get(i++)));
         
-        if (currTokenType(TokenType.open_parenthesis)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        arithmeticExpression();
-        children.add(root);
-
-        if (currTokenType(TokenType.close_parenthesis)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        root = new ParseTreeNode(SymbolType.print_statement);
-        root.setChildren(children);
+        throw new Error();
     }
-
     
-    private static void whileStatement() {
-
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        children.add(tokenToParseTreeNode(tokens.get(i++)));
-
-        booleanExpression();
-        children.add(root);
+    private static PrintStatement printStatement() {
         
-        if (currTokenType(TokenType.DO_keyword)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        block();
-        children.add(root);
-
-        if (currTokenType(TokenType.END)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        root = new ParseTreeNode(SymbolType.while_statement);
-        root.setChildren(children);
+        // System.out.println("print");
+        
+        consumeToken(TokenType.PRINT_keyword);
+        consumeToken(TokenType.open_parenthesis);
+        ArithmeticExpression printable = arithmeticExpression();
+        consumeToken(TokenType.close_parenthesis);
+        
+        return new PrintStatement(printable);
     }
     
-    private static void assignmentStatement() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        children.add(tokenToParseTreeNode(tokens.get(i++)));
-
-        assignmentOp();
-        children.add(root);
-
-        arithmeticExpression();
-        children.add(root);
-
-        root = new ParseTreeNode(SymbolType.assignment_statement);
-        root.setChildren(children);
+    
+    private static WhileStatement whileStatement() {
+        
+        // System.out.println("while");
+        
+        consumeToken(TokenType.WHILE_keyword);
+        BooleanExpression condition = booleanExpression();
+        consumeToken(TokenType.DO_keyword);
+        Block doBlock = block();
+        consumeToken(TokenType.END);
+        
+        return new WhileStatement(condition, doBlock);
     }
     
-    private static void assignmentOp() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-
+    private static AssignmentStatement assignmentStatement() {
+        
+        // System.out.println("assignment");
+        Identifier id = new Identifier(consumeToken(TokenType.identifier).lexeme.charAt(0));
+        TokenType op = assignmentOp();
+        ArithmeticExpression expression = arithmeticExpression();
+        
+        return new AssignmentStatement(id, op, expression);
+    }
+    
+    private static TokenType assignmentOp() {
+        
+        // System.out.println("assignment op");
+        
         TokenType expectedTokens[] = {
             TokenType.assignment_operator,
             TokenType.addEq_operator
         };
-
-        boolean found = false;
-
+        
         for (TokenType expectedTokenType : expectedTokens) {
             if (currTokenType(expectedTokenType)) {
-                children.add(tokenToParseTreeNode(tokens.get(i++)));
-                found = true;
-                break;
+                nextToken();
+                return expectedTokenType;
             } 
         }
-
-        if (!found) {
-            terminateWithError();
-        }
-
-        root = new ParseTreeNode(SymbolType.assignment_operator, children);
-    }
-
-    private static void ifStatement() {
         
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        children.add(tokenToParseTreeNode(tokens.get(i++)));
-
-        booleanExpression();
-        children.add(root);
-        
-        if (currTokenType(TokenType.THEN_keyword)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        block();
-        children.add(root);
-
-        if (currTokenType(TokenType.ELSE_keyword)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        block();
-        children.add(root);
-
-        if (currTokenType(TokenType.END)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            terminateWithError();
-        }
-
-        root = new ParseTreeNode(SymbolType.if_statement);
-        root.setChildren(children);
+        throw new Error();
     }
     
-    private static void arithmeticExpression() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-        if (currTokenType(TokenType.identifier)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else if (currTokenType(TokenType.literal_Integers)) {
-            children.add(tokenToParseTreeNode(tokens.get(i++)));
-        } else {
-            arithmeticOp();
-            children.add(root);
-            arithmeticExpression();
-            children.add(root);
-            arithmeticExpression();
-            children.add(root);
-        }
-        root = new ParseTreeNode(SymbolType.arithmetic_expression);
-        root.setChildren(children);
+    private static IfStatement ifStatement() {
+        
+        // System.out.println("if");
+        
+        consumeToken(TokenType.IF_keyword);
+        BooleanExpression condition = booleanExpression();
+        consumeToken(TokenType.THEN_keyword);
+        Block thenBlock = block();
+        consumeToken(TokenType.ELSE_keyword);
+        Block elseBlock = block();
+        consumeToken(TokenType.END);
+        
+        return new IfStatement(condition, thenBlock, elseBlock);
+        
     }
-
-    private static void arithmeticOp() {
-        ArrayList<ParseTreeNode> children = new ArrayList<>();
-
+    
+    private static ArithmeticExpression arithmeticExpression() {
+        
+        // System.out.println("arith expr");
+        
+        if (currTokenType(TokenType.identifier)) {
+            return new Identifier(consumeToken(TokenType.identifier).lexeme.charAt(0));
+        } else if (currTokenType(TokenType.literal_Integers)) {
+            int value = Integer.parseInt(consumeToken(TokenType.literal_Integers).lexeme);
+            return new LiteralInteger(value);
+        } else {
+            return new ArithmeticOp(arithmeticOp(), arithmeticExpression(), arithmeticExpression());
+        }
+        
+    }
+    
+    private static TokenType arithmeticOp() {
+        
+        // System.out.println("arith op");
+        
         TokenType expectedTokens[] = {
             TokenType.add_operator,
             TokenType.sub_operator,
             TokenType.mult_operator,
             TokenType.div_operator
         };
-
-        boolean found = false;
-
+        
         for (TokenType expectedTokenType : expectedTokens) {
             if (currTokenType(expectedTokenType)) {
-                children.add(tokenToParseTreeNode(tokens.get(i++)));
-                found = true;
-                break;
+                nextToken();
+                return expectedTokenType;
             }
         }
-
-        if (!found) {
-            terminateWithError();
-        }
-
-        root = new ParseTreeNode(SymbolType.arithmetic_op, children);
-    }
-
-    private static ParseTreeNode tokenToParseTreeNode(Token token) {
-        return new ParseTreeNode(SymbolType.values()[token.tokenType.ordinal()], token.lexeme);
+        
+        throw new Error();
     }
     
     private static void terminateWithError() {
-        System.out.println(tokens.get(i).lexeme);
-        System.out.println(i);
+        // System.out.println(tokens.get(i).lexeme);
+        // System.out.println(i);
         throw new Error("bad input");
     }
-
+    
     public static boolean currTokenType(TokenType t) {
         if (i == tokens.size()) return false;
         Token curr = tokens.get(i);
         return curr.tokenType == t;
     }
-
-    public static boolean nextTokenType(TokenType t) {
-        Token next = peek();
-        if (next == null) return false;
-        return next.tokenType == t;
-    }
-
-    public static Token peek() {
-        if (i >= tokens.size()-1) {
-            return null;
+    
+    private static Token nextToken() { return tokens.get(i++); }
+    private static Token consumeToken(TokenType t) {
+        if (!currTokenType(t)) {
+            terminateWithError();
         }
-        return tokens.get(i+1);
+        return nextToken();
     }
-
+    
 }
 
-/*
+// private static void bfs(ParseTreeNode root) {
 
-<block> - <statement> | <statement> <block>
+//     Queue<ParseTreeNode> q = new LinkedList<ParseTreeNode>();
+//     q.add(root);
 
+//     System.out.println();
 
+//     while (!q.isEmpty()) {
+//         ParseTreeNode curr = q.remove();
+//         System.out.printf("<%s> -> ", curr.symbol);
 
-*/
+//         for (ParseTreeNode child : curr.children) {
+//             if (child.isTerminal) {
+//                 System.out.printf("%s ", child.value);
+//             } else {
+//                 System.out.printf("<%s> ", child.symbol);
+//                 q.add(child);
+//             }
+//         }
+//         System.out.println();
+//     }
+
+// }

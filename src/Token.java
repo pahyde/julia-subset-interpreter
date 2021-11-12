@@ -1,3 +1,5 @@
+import lexer.TokenType;
+
 public class Token {
     public TokenType tokenType;
     public String    lexeme;
